@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <cstring>
+#include <fcntl.h>
 
 // Splits a raw input line into a vector of tokens (very simple whitespace split
 // for now -- doesn't yet handle quoted strings, | or > as separate tokens).
@@ -47,6 +48,24 @@ std::vector<char *> toArgv(std::vector<std::string> &tokens) {
     return argv;
 }
 
+// Looks for a ">" token. If found, removes it and the filename that follows
+// it from `tokens`, and returns the filename separately. Returns "" if no
+// redirection was requested.
+std::string extractOutputRedirect(std::vector<std::string> &tokens) {
+    for (size_t i = 0; i < tokens.size(); i++) {
+        if (tokens[i] == ">") {
+            if (i + 1 >= tokens.size()) {
+                std::cerr << "mini-shell: expected filename after '>'" << std::endl;
+                return "";
+            }
+            std::string filename = tokens[i + 1];
+            tokens.erase(tokens.begin() + i, tokens.begin() + i + 2); // remove ">" and filename
+            return filename;
+        }
+    }
+    return "";
+}
+
 int main() {
     std::string line;
 
@@ -65,6 +84,10 @@ int main() {
         std::vector<std::string> tokens = tokenize(line);
         if (tokens.empty()) {
             continue;
+        }
+        std::string outputFile = extractOutputRedirect(tokens);
+        if (tokens.empty()) {
+            continue; // handled a line that was just "> file" with nothing else
         }
 
         const std::string &cmd = tokens[0];
@@ -94,6 +117,15 @@ int main() {
 
         if (pid == 0) {
             // Child process
+            if (!outputFile.empty()) {
+                int fd = open(outputFile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd < 0) {
+                    perror("open");
+                    _exit(1);
+                }
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+            }
             std::vector<char *> argv = toArgv(tokens);
             execvp(argv[0], argv.data());
             // execvp only returns if it failed
