@@ -3,3 +3,4 @@ mini-shell
 *.out
 .vscode/
 .DS_Store
+test.txt
