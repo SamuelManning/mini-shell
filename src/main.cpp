@@ -80,6 +80,62 @@ std::string extractInputRedirect(std::vector<std::string> &tokens) {
     }
     return "";
 }
+
+// Returns true if a "|" was found in tokens, and splits everything into
+// two separate command vectors — one for each side of the pipe.
+bool splitOnPipe(const std::vector<std::string> &tokens,
+                  std::vector<std::string> &left,
+                  std::vector<std::string> &right) {
+    for (size_t i = 0; i < tokens.size(); i++) {
+        if (tokens[i] == "|") {
+            left.assign(tokens.begin(), tokens.begin() + i);
+            right.assign(tokens.begin() + i + 1, tokens.end());
+            return true;
+        }
+    }
+    return false;
+}
+
+// Runs two commands connected by a pipe: left's output feeds right's input.
+void runPipeline(std::vector<std::string> &leftTokens, std::vector<std::string> &rightTokens) {
+    int pipefd[2];
+    if (pipe(pipefd) < 0) {
+        perror("pipe");
+        return;
+    }
+
+    pid_t pid1 = fork();
+    if (pid1 == 0) {
+        // First child: its OUTPUT goes into the pipe instead of the screen
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[0]);
+        close(pipefd[1]);
+        std::vector<char *> argv = toArgv(leftTokens);
+        execvp(argv[0], argv.data());
+        perror("mini-shell");
+        _exit(127);
+    }
+
+    pid_t pid2 = fork();
+    if (pid2 == 0) {
+        // Second child: its INPUT comes from the pipe instead of the keyboard
+        dup2(pipefd[0], STDIN_FILENO);
+        close(pipefd[0]);
+        close(pipefd[1]);
+        std::vector<char *> argv = toArgv(rightTokens);
+        execvp(argv[0], argv.data());
+        perror("mini-shell");
+        _exit(127);
+    }
+
+    // Parent doesn't use the pipe itself — must close both ends, or the
+    // second command will hang forever waiting for input that never
+    // technically "ends".
+    close(pipefd[0]);
+    close(pipefd[1]);
+    waitpid(pid1, nullptr, 0);
+    waitpid(pid2, nullptr, 0);
+}
 int main() {
     std::string line;
 
@@ -97,6 +153,11 @@ int main() {
 
         std::vector<std::string> tokens = tokenize(line);
         if (tokens.empty()) {
+            continue;
+        }
+        std::vector<std::string> leftTokens, rightTokens;
+        if (splitOnPipe(tokens, leftTokens, rightTokens)) {
+            runPipeline(leftTokens, rightTokens);
             continue;
         }
         std::string outputFile = extractOutputRedirect(tokens);
