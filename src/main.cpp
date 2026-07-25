@@ -66,6 +66,20 @@ std::string extractOutputRedirect(std::vector<std::string> &tokens) {
     return "";
 }
 
+std::string extractInputRedirect(std::vector<std::string> &tokens) {
+    for (size_t i = 0; i < tokens.size(); i++) {
+        if (tokens[i] == "<") {
+            if (i + 1 >= tokens.size()) {
+                std::cerr << "mini-shell: expected filename after '<'" << std::endl;
+                return "";
+            }
+            std::string filename = tokens[i + 1];
+            tokens.erase(tokens.begin() + i, tokens.begin() + i + 2);
+            return filename;
+        }
+    }
+    return "";
+}
 int main() {
     std::string line;
 
@@ -86,6 +100,7 @@ int main() {
             continue;
         }
         std::string outputFile = extractOutputRedirect(tokens);
+        std::string inputFile = extractInputRedirect(tokens);
         if (tokens.empty()) {
             continue; // handled a line that was just "> file" with nothing else
         }
@@ -124,6 +139,15 @@ int main() {
                     _exit(1);
                 }
                 dup2(fd, STDOUT_FILENO);
+                close(fd);
+            }
+            if (!inputFile.empty()) {
+                int fd = open(inputFile.c_str(), O_RDONLY);
+                if (fd < 0) {
+                    perror("open");
+                    _exit(1);
+                }
+                dup2(fd, STDIN_FILENO);
                 close(fd);
             }
             std::vector<char *> argv = toArgv(tokens);
